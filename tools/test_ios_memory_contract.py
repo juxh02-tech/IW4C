@@ -21,7 +21,7 @@ class Contract(unittest.TestCase):
         self.assertEqual(plist["CFBundleVersion"], "22")
         # The label shown in the main menu is the release name.
         self.assertIn('const APP_LABEL: &str = "0.3.8";', text("crates/launcher/src/main.rs"))
-        self.assertEqual(plist["CFBundleIdentifier"], "com.markussela.iw4l")
+        self.assertEqual(plist["CFBundleIdentifier"], "com.juxh02tech.iw4c")
         lock = re.search(r'name = "launcher"\nversion = "([^"]+)"', text("Cargo.lock"))
         self.assertIsNotNone(lock)
         self.assertEqual(lock.group(1), cargo)
