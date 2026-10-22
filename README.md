@@ -1,3 +1,9 @@
+# IW4C — Cupidon Edition
+
+Version personnelle pour iPhone, basée sur IW4 Pocket et IW4L.
+Voir [le guide iPhone](docs/IW4C-IPHONE.md) pour compiler et installer.
+Le moteur reste expérimental ; aucune validation sur iPhone 16 Plus pour le moment.
+
 <table align="center">
 <tr>
 <td align="center" width="50%">
