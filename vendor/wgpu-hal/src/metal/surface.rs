@@ -96,7 +96,16 @@ impl crate::Surface for super::Surface {
         }
 
         // this gets ignored on iOS for certain OS/device combinations (iphone5s iOS 10.3)
-        render_layer.setMaximumDrawableCount(config.maximum_frame_latency as usize + 1);
+        // Keep the iOS display pool independent of the submitted-frame limit.
+        // With two drawables, scanout can retain one while the other is queued,
+        // leaving nextDrawable waiting even with a single submitted GPU frame.
+        // A third display surface does not raise wgpu's in-flight frame limit.
+        let drawable_count = if cfg!(target_os = "ios") {
+            3
+        } else {
+            config.maximum_frame_latency as usize + 1
+        };
+        render_layer.setMaximumDrawableCount(drawable_count);
         render_layer.setDrawableSize(drawable_size);
         // https://developer.apple.com/documentation/quartzcore/cametallayer/allowsnextdrawabletimeout
         if available!(macos = 10.13, ios = 11.0, tvos = 11.0, visionos = 1.0) {
