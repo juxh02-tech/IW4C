@@ -1,9 +1,3 @@
-//! One `match summary:` line every 30 s while a match is running (`diag::events`).
-//!
-//! The figures are the ones the rest of the diagnostics already keep: frames counted
-//! here, bots in the roster, footprint / available / heap from `diag::ios_env`, and the
-//! peak footprint and least headroom from `diag::session`. Nothing is written in menus
-//! or while a map loads.
 use bevy::prelude::*;
 
 pub(crate) fn register(app: &mut App) {
@@ -12,17 +6,17 @@ pub(crate) fn register(app: &mut App) {
 
 #[derive(Default)]
 struct Window {
-    /// Real seconds since the match began (live).
     match_secs: f64,
-    /// Real seconds and frames since the last summary line.
     secs: f64,
     frames: u32,
+    movement_report_secs: f64,
 }
 
 fn log_match_summary(
     time: Res<Time<Real>>,
     screen: Option<Res<frame::AppScreen>>,
     roster: Option<Res<bots::BotRoster>>,
+    prediction: Option<Res<net::ClientPredictionState>>,
     mut window: Local<Window>,
 ) {
     if screen.as_deref() != Some(&frame::AppScreen::InGame) {
@@ -33,6 +27,19 @@ fn log_match_summary(
     window.match_secs += dt;
     window.secs += dt;
     window.frames += 1;
+    if window.match_secs - window.movement_report_secs >= 5.0 {
+        window.movement_report_secs = window.match_secs;
+        if let Some(prediction) = prediction {
+            let error = prediction.0.predicted_error();
+            diag::info!(
+                Launch,
+                "movement summary: {} correction_last={:.3} correction_offset={:?}",
+                prediction.0.metrics().report_line(),
+                error.last_miss_len(),
+                error.offset()
+            );
+        }
+    }
     if window.secs < diag::events::MATCH_SUMMARY_EVERY_SECS {
         return;
     }
