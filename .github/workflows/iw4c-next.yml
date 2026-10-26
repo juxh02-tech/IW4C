@@ -1,0 +1,101 @@
+name: IW4C alternative engine
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  iphone:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: branding
+      - uses: actions/checkout@v4
+        with:
+          repository: jesaias1/IW4LJ
+          ref: 72d7154c3a447aa14afba340f27e9ca4a539f450
+          path: upstream
+      - name: Prepare IW4C source and preserve attribution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import plistlib
+          import tomllib
+          import json
+          
+          source=Path('upstream')
+          target=Path('candidate')
+          assert not target.exists(), 'Refuse to overwrite an existing candidate'
+          shutil.copytree(source/'IW4LJ-iOS',target)
+          shared=source/'IW4LJ-Android'
+          for name in ['Cargo.toml','Cargo.lock','LICENSE','NOTICE','THIRD-PARTY-LICENSES.txt']:
+              shutil.copyfile(shared/name,target/name)
+          if (shared/'vendor').exists(): shutil.copytree(shared/'vendor',target/'vendor',dirs_exist_ok=True)
+          shutil.copytree(shared/'xtask',target/'xtask',dirs_exist_ok=True)
+          manifest=target/'Cargo.toml'
+          text=manifest.read_text().replace('members = [','members = [\n    "crates/ios",\n    "crates/mobile",',1)
+          manifest.write_text(text)
+          config=tomllib.loads(text)
+          for member in config['workspace']['members']:
+              assert (target/member/'Cargo.toml').exists(), f'Missing workspace member: {member}'
+          for name,dependency in config['workspace']['dependencies'].items():
+              if isinstance(dependency,dict) and 'path' in dependency:
+                  assert (target/dependency['path']/'Cargo.toml').exists(), f'Missing dependency: {name}'
+          # Preserve the existing game-data path so a future trial can reuse this user's
+          # IW4C container without migrating/deleting its six gigabytes of assets.
+          entry=target/'crates/ios/src/lib.rs'
+          entry.write_text(entry.read_text().replace('dirs.files.join("mw2")','dirs.files.join("Games").join("MW2")'))
+          mobile=target/'crates/mobile/src/lib.rs'
+          text=mobile.read_text()
+          needle='    for base in [media, files] {\n        let candidate = base.join("mw2");'
+          replacement='    for base in [media, files] {\n        let candidate = base.join("Games").join("MW2");\n        if candidate.join("zone").is_dir() { return candidate; }\n        let candidate = base.join("mw2");'
+          assert needle in text
+          text=text.replace(needle,replacement,1)
+          mobile.write_text(text)
+          if 'dirs.files.join("mw2")' in text:
+              text=text.replace('dirs.files.join("mw2")','dirs.files.join("Games").join("MW2")')
+              mobile.write_text(text)
+          icons=target/'ios/iw4c-icons'
+          icons.mkdir(parents=True,exist_ok=True)
+          for icon in Path('branding/ios/icons').glob('*.png'): shutil.copyfile(icon,icons/icon.name)
+          info=plistlib.loads(Path('branding/ios/Info.plist').read_bytes())
+          info.update(CFBundleDisplayName='IW4C Test',CFBundleName='IW4C',CFBundleIdentifier='com.juxh02tech.iw4c.next',CFBundleExecutable='iw4lj',CFBundleShortVersionString='0.4.0',CFBundleVersion='27',MinimumOSVersion='16.0')
+          (target/'ios/Info.plist').write_bytes(plistlib.dumps(info))
+          out=Path('outputs/IW4C-next'); out.mkdir(parents=True,exist_ok=True)
+          report=dict(basis='jesaias1/IW4LJ ios-v0.2.0',bundle_identifier=info['CFBundleIdentifier'],display_name=info['CFBundleDisplayName'],workspace_members_checked=len(config['workspace']['members']),dependency_paths_checked=True,compiled=False,installed=False,gameplay_verified=False,existing_app_modified=False)
+          (out/'preparation.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: candidate
+          key: iw4c-alternative-ios
+      - name: Compile native iPhone engine
+        working-directory: candidate
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: '16.0'
+          CARGO_PROFILE_RELEASE_STRIP: none
+        run: |
+          set -o pipefail
+          cargo build --release --target aarch64-apple-ios -p iw4l-ios --bin iw4lj 2>&1 | tee build.log
+      - name: Package IW4C test application
+        run: |
+          mkdir -p Payload/IW4C.app
+          cp candidate/target/aarch64-apple-ios/release/iw4lj Payload/IW4C.app/
+          cp candidate/ios/Info.plist Payload/IW4C.app/
+          cp candidate/ios/iw4c-icons/*.png Payload/IW4C.app/
+          cp candidate/LICENSE candidate/NOTICE candidate/THIRD-PARTY-LICENSES.txt Payload/IW4C.app/
+          zip -qr IW4C-Test.ipa Payload
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: IW4C-alternative
+          path: |
+            IW4C-Test.ipa
+            candidate/build.log
+            outputs/IW4C-next/preparation.json
