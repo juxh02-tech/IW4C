@@ -57,11 +57,26 @@ jobs:
           if 'dirs.files.join("mw2")' in text:
               text=text.replace('dirs.files.join("mw2")','dirs.files.join("Games").join("MW2")')
               mobile.write_text(text)
+          menu=target/'crates/touch/src/menu.rs'
+          text=menu.read_text()
+          assert 'IW4LJ  //  MENU' in text
+          menu.write_text(text.replace('IW4LJ  //  MENU','IW4C  //  CUPIDON',1))
+          
+          # Read each native iOS gesture once; preserve its message ID and lifetime.
+          ios_touch=target/'crates/touch/src/ios.rs'
+          text=ios_touch.read_text()
+          text=text.replace('use bevy::ecs::system::NonSendMarker;', 'use bevy::ecs::system::NonSendMarker;\nuse bevy::ecs::message::MessageMutator;')
+          text=text.replace('mut touches: ResMut<Messages<TouchInput>>,', 'mut touches: MessageMutator<TouchInput>,')
+          text=text.replace('    let pending: Vec<TouchInput> = touches.drain().collect();\n    for mut touch in pending {', '    // Preserve event identity: never requeue old gestures.\n    for touch in touches.read() {')
+          text=text.replace('        touches.write(touch);\n','')
+          assert 'touches.drain()' not in text
+          ios_touch.write_text(text)
+          
           icons=target/'ios/iw4c-icons'
           icons.mkdir(parents=True,exist_ok=True)
           for icon in Path('branding/ios/icons').glob('*.png'): shutil.copyfile(icon,icons/icon.name)
           info=plistlib.loads(Path('branding/ios/Info.plist').read_bytes())
-          info.update(CFBundleDisplayName='IW4C Test',CFBundleName='IW4C',CFBundleIdentifier='com.juxh02tech.iw4c.next',CFBundleExecutable='iw4lj',CFBundleShortVersionString='0.4.0',CFBundleVersion='27',MinimumOSVersion='16.0')
+          info.update(CFBundleDisplayName='IW4C',CFBundleName='IW4C',CFBundleIdentifier='com.juxh02tech.iw4c',CFBundleExecutable='iw4lj',CFBundleShortVersionString='0.4.1',CFBundleVersion='28',MinimumOSVersion='16.0')
           (target/'ios/Info.plist').write_bytes(plistlib.dumps(info))
           out=Path('outputs/IW4C-next'); out.mkdir(parents=True,exist_ok=True)
           report=dict(basis='jesaias1/IW4LJ ios-v0.2.0',bundle_identifier=info['CFBundleIdentifier'],display_name=info['CFBundleDisplayName'],workspace_members_checked=len(config['workspace']['members']),dependency_paths_checked=True,compiled=False,installed=False,gameplay_verified=False,existing_app_modified=False)
@@ -75,6 +90,15 @@ jobs:
         with:
           workspaces: candidate
           key: iw4c-alternative-ios
+      - name: Verify gesture lifetime regression
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('regression/src'); p.mkdir(parents=True,exist_ok=True)
+          (p/'lib.rs').write_text("use bevy_ecs::prelude::*;\n#[derive(Message)] struct Touch(f32);\n#[derive(Resource, Default)] struct Seen(Vec<f32>);\nfn fixed(mut touches: MessageMutator<Touch>) {\n    for touch in touches.read() { touch.0 *= 0.5; }\n}\nfn broken(mut touches: ResMut<Messages<Touch>>) {\n    let pending: Vec<_> = touches.drain().collect();\n    for mut touch in pending { touch.0 *= 0.5; touches.write(touch); }\n}\nfn observe(mut touches: MessageReader<Touch>, mut seen: ResMut<Seen>) {\n    seen.0.extend(touches.read().map(|touch| touch.0));\n}\nfn world() -> World {\n    let mut world = World::new();\n    world.init_resource::<Messages<Touch>>(); world.init_resource::<Seen>(); world\n}\n#[test]\nfn a_gesture_is_remapped_once_and_does_not_repeat_without_new_input() {\n    let mut world = world(); let mut schedule = Schedule::default();\n    schedule.add_systems((fixed, observe).chain());\n    world.write_message(Touch(8.0)); schedule.run(&mut world);\n    assert_eq!(world.resource::<Seen>().0, [4.0]);\n    world.resource_mut::<Messages<Touch>>().update(); schedule.run(&mut world);\n    assert_eq!(world.resource::<Seen>().0, [4.0]);\n    world.write_message(Touch(10.0)); schedule.run(&mut world);\n    assert_eq!(world.resource::<Seen>().0, [4.0,5.0]);\n    for _ in 0..4 { world.resource_mut::<Messages<Touch>>().update(); schedule.run(&mut world); }\n    assert_eq!(world.resource::<Seen>().0, [4.0,5.0]);\n}\n#[test]\nfn previous_drain_rewrite_reproduces_input_without_a_new_gesture() {\n    let mut world = world(); let mut schedule = Schedule::default();\n    schedule.add_systems((broken, observe).chain());\n    world.write_message(Touch(8.0)); schedule.run(&mut world);\n    world.resource_mut::<Messages<Touch>>().update(); schedule.run(&mut world);\n    world.resource_mut::<Messages<Touch>>().update(); schedule.run(&mut world);\n    assert_eq!(world.resource::<Seen>().0, [4.0,2.0,1.0]);\n}\n")
+          Path('regression/Cargo.toml').write_text("[package]\nname=\"iw4c-input-regression\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[dependencies]\nbevy_ecs=\"0.20\"\n")
+          PY
+          cargo test --manifest-path regression/Cargo.toml
       - name: Compile native iPhone engine
         working-directory: candidate
         env:
