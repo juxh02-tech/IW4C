@@ -1,0 +1,37 @@
+name: IW4C Windows relay
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  relay:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: upstream/IW4LJ-Android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: jesaias1/IW4LJ
+          ref: 72d7154c3a447aa14afba340f27e9ca4a539f450
+          path: upstream
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/IW4LJ-Android
+          key: iw4c-windows-relay
+      - name: Verify relay wire protocol
+        run: cargo test -p master_protocol --lib
+      - name: Compile Windows relay
+        run: cargo build --release -p iw4l-master
+      - name: Package relay and credits
+        run: |
+          New-Item -ItemType Directory -Force relay-package | Out-Null
+          Copy-Item target/release/iw4l-master.exe relay-package/
+          Copy-Item LICENSE,NOTICE,THIRD-PARTY-LICENSES.txt relay-package/
+          Get-FileHash relay-package/iw4l-master.exe -Algorithm SHA256 | ConvertTo-Json | Set-Content relay-package/binary-sha256.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IW4C-relay-Windows
+          path: upstream/IW4LJ-Android/relay-package/
